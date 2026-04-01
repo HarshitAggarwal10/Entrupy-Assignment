@@ -8,9 +8,9 @@ function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
 
   const navigation = [
-    { id: 'dashboard', label: 'Dashboard', icon: '📊' },
-    { id: 'products', label: 'Products', icon: '📦' },
-    { id: 'notifications', label: 'Notifications', icon: '🔔' },
+    { id: 'dashboard', label: 'Dashboard' },
+    { id: 'products', label: 'Products' },
+    { id: 'notifications', label: 'Notifications' },
   ];
 
   return (
@@ -20,7 +20,7 @@ function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-bold text-blue-600">💰 Price Monitor</h1>
+              <h1 className="text-2xl font-bold text-blue-600">Price Monitor</h1>
             </div>
             <div className="flex gap-1 sm:gap-4">
               {navigation.map((item) => (
@@ -33,8 +33,7 @@ function App() {
                       : 'text-gray-700 hover:bg-gray-100'
                   }`}
                 >
-                  <span className="hidden sm:inline">{item.icon} {item.label}</span>
-                  <span className="sm:hidden">{item.icon}</span>
+                  {item.label}
                 </button>
               ))}
             </div>

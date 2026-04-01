@@ -61,9 +61,9 @@ export default function Notifications() {
       case 'price_drop':
         return '📉 Price Drop';
       case 'price_increase':
-        return '📈 Price Increase';
+        return 'Price Increase';
       case 'new_product':
-        return '✨ New Product';
+        return 'New Product';
       default:
         return eventType;
     }
