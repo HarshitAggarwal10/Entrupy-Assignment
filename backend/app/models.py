@@ -84,6 +84,63 @@ class RequestLog(Base):
     )
 
 
+class User(Base):
+    """Customer user account for web authentication"""
+    __tablename__ = "users"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    username = Column(String, unique=True, index=True, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    full_name = Column(String, nullable=True)
+    is_active = Column(Boolean, default=True, index=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    last_login = Column(DateTime, nullable=True)
+    
+    # Rate limiting
+    requests_today = Column(Integer, default=0)
+    max_requests_per_day = Column(Integer, default=1000)
+    requests_this_month = Column(Integer, default=0)
+    max_requests_per_month = Column(Integer, default=50000)
+    
+    # Relationships
+    usage_logs = relationship("UserUsageLog", back_populates="user", cascade="all, delete-orphan")
+    
+    __table_args__ = (
+        Index('idx_user_username', 'username'),
+        Index('idx_user_email', 'email'),
+        Index('idx_user_active', 'is_active'),
+    )
+
+
+class UserUsageLog(Base):
+    """Track API usage per customer"""
+    __tablename__ = "user_usage_logs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint = Column(String, nullable=False)
+    method = Column(String, nullable=False)
+    path = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=False)
+    response_time_ms = Column(Float, nullable=False)
+    request_size_kb = Column(Float, nullable=True)
+    response_size_kb = Column(Float, nullable=True)
+    ip_address = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    query_params = Column(JSON, nullable=True)
+    timestamp = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    # Relationships
+    user = relationship("User", back_populates="usage_logs")
+    
+    __table_args__ = (
+        Index('idx_user_usage_user_timestamp', 'user_id', 'timestamp'),
+        Index('idx_user_usage_endpoint', 'endpoint'),
+        Index('idx_user_usage_timestamp', 'timestamp'),
+    )
+
+
 class NotificationEvent(Base):
     __tablename__ = "notification_events"
 

@@ -104,3 +104,75 @@ class DataRefreshResponse(BaseModel):
     error_count: int
     new_price_changes: int
     duration_seconds: float
+
+
+# Customer Authentication Schemas
+class UserRegister(BaseModel):
+    """User registration request"""
+    username: str = Field(..., min_length=3, max_length=50)
+    email: str = Field(..., regex=r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$")
+    password: str = Field(..., min_length=8)
+    full_name: Optional[str] = None
+
+
+class UserLogin(BaseModel):
+    """User login request"""
+    username: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    """User profile response"""
+    id: str
+    username: str
+    email: str
+    full_name: Optional[str]
+    is_active: bool
+    created_at: datetime
+    last_login: Optional[datetime]
+    requests_today: int
+    max_requests_per_day: int
+    requests_this_month: int
+    max_requests_per_month: int
+
+    class Config:
+        from_attributes = True
+
+
+class TokenResponse(BaseModel):
+    """Authentication token response"""
+    access_token: str
+    token_type: str
+    user: UserResponse
+    message: str
+
+
+class UserUsageResponse(BaseModel):
+    """User API usage statistics"""
+    user_id: str
+    total_requests: int
+    requests_today: int
+    requests_this_month: int
+    limit_today: int
+    limit_this_month: int
+    requests_remaining_today: int
+    requests_remaining_month: int
+    average_response_time_ms: float
+    top_endpoints: List[Dict[str, Any]]
+    last_request_timestamp: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class RequestLogDetail(BaseModel):
+    """Request log entry"""
+    id: str
+    endpoint: str
+    method: str
+    status_code: int
+    response_time_ms: float
+    timestamp: datetime
+    
+    class Config:
+        from_attributes = True

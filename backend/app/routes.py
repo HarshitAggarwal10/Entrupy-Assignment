@@ -4,6 +4,7 @@ from sqlalchemy import select, and_, func
 from typing import List, Optional
 from datetime import datetime
 import time
+import logging
 
 from app.database import get_db
 from app.models import Product, PriceHistory, NotificationEvent, RequestLog, APIKey
@@ -21,6 +22,7 @@ from app.schemas import (
 from app.import_products import load_products_from_json_files, get_product_stats
 from app.notifications import notification_manager
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["products"])
 
 
@@ -261,17 +263,31 @@ async def create_api_key_endpoint(
     name: str,
     db: AsyncSession = Depends(get_db)
 ):
-    """Create a new API key for consumer"""
-    from app.auth import create_api_key
+    """Create a new API key for consumer authentication"""
+    if not name or len(name.strip()) == 0:
+        raise HTTPException(status_code=400, detail="API key name is required")
     
-    key_value = await create_api_key(name, db)
+    if len(name) > 100:
+        raise HTTPException(status_code=400, detail="API key name must be less than 100 characters")
     
-    return {
-        "name": name,
-        "api_key": key_value,
-        "message": "API key created. Use this key in X-API-Key header.",
-        "warning": "Save this key securely. You won't be able to see it again."
-    }
+    try:
+        from app.auth import create_api_key
+        key_id, key_value = await create_api_key(name.strip(), db)
+        
+        return {
+            "success": True,
+            "id": key_id,
+            "name": name.strip(),
+            "api_key": key_value,
+            "message": "API key created successfully. Use this key in X-API-Key header.",
+            "warning": "⚠️ Save this key securely. You won't be able to see it again.",
+            "usage_example": "curl -H 'X-API-Key: {api_key}' http://localhost:8000/api/products"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error creating API key: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create API key")
 
 
 @router.get("/api-keys", response_model=dict)
