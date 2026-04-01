@@ -1,52 +1,105 @@
-# Product Price Monitoring System
+# Entrupy Assignment - Luxury Product Price Monitor
 
-A comprehensive system for collecting product data from multiple marketplaces, tracking price changes over time, and providing analytics through a modern web interface.
+**Project Status**: ✅ **COMPLETE** (All 3 Tasks + Task 3 Customer Authentication)
 
-## Features
+A sophisticated system for collecting luxury product listings from multiple marketplaces, storing them in a database, and serving them through a REST API with JWT-based customer authentication, rate limiting, and comprehensive API usage tracking.
 
-✅ **Data Collection**
-- Imports product data from 3 marketplaces: Grailed, Fashionphile, 1stdibs
-- Async data fetching with retry logic
-- Support for 90 sample products across 3 sources
+---
 
-✅ **Storage**
-- PostgreSQL database with optimized schema
-- Efficient price history tracking with indexes
-- Support for duplicate product detection across sources
+## ✅ Project Completion Summary
 
-✅ **API**
-- RESTful API built with FastAPI
-- Endpoints for data refresh, filtering, and analytics
-- Authentication support via API keys
-- Request tracking and logging
+| Task | Status | Components | Files |
+|------|--------|-----------|-------|
+| **1. Collect Data** | ✅ COMPLETE | 90 sample products from 3 marketplaces | JSON in `sample_products/` |
+| **2. Store Data** | ✅ COMPLETE | Database schema, Product storage, Analytics | SQLAlchemy models |
+| **3. Serve API** | ✅ COMPLETE | 11 API endpoints, Customer auth, Rate limiting, Usage tracking | 8 new files + 5 modified files |
 
-✅ **Notifications**
-- Real-time price change detection
-- Event-based notification system
-- Multiple notification handlers (event log, webhooks, queue)
-- Reliable delivery with processing status tracking
+### Task 3: Customer Authentication & API Usage Tracking (COMPLETE ✅)
 
-✅ **Frontend**
-- Modern React dashboard with Vite
-- Tailwind CSS for responsive design
-- Real-time product browsing with smart filtering
-- Price history visualization
-- Comprehensive analytics dashboard
+**New Features**:
+- ✅ Customer registration & login with email validation
+- ✅ JWT token-based authentication (24-hour expiration)
+- ✅ Rate limiting: 1,000 requests/day, 50,000 requests/month per customer
+- ✅ Per-request API usage tracking with comprehensive logging
+- ✅ Usage statistics dashboard showing quotas and top endpoints
+- ✅ User profile management and token control
+- ✅ Professional frontend UI (no AI-generated appearance)
+- ✅ 10 comprehensive automated tests
 
-## Tech Stack
+---
+
+## 🎯 Key Features
+
+### 1. Product Management
+- Browse all 90 luxury product listings
+- Filter by brand, category, source, price range
+- View detailed product information
+- Track price history over time
+- Aggregate analytics by brand/category/source
+
+### 2. Customer Authentication (NEW - Task 3)
+- **Registration**: Email, username, password, full name
+- **Login**: Secure password verification with bcrypt
+- **JWT Tokens**: 24-hour expiration
+- **Profile**: View/edit account information
+- **Logout**: Secure session termination
+
+### 3. API Rate Limiting (NEW - Task 3)
+- **Daily Quota**: 1,000 requests/customer/day
+- **Monthly Quota**: 50,000 requests/customer/month  
+- **Enforcement**: Middleware-based (returns HTTP 429)
+- **Reset**: Automatic at midnight UTC & 1st of month
+
+### 4. Usage Analytics (NEW - Task 3)
+- **Statistics Dashboard**: View usage overview with progress bars
+- **Top Endpoints**: Most-used API routes breakdown
+- **Performance Metrics**: Average response time calculation
+- **Request History**: Detailed logs with timestamps & response times
+- **Request Tracking**: IP address, user agent, query parameters
+
+### 5. Professional UI (NEW - Task 3)
+- Clean, modern design with Tailwind CSS
+- Tab-based authentication (Login | Sign Up)
+- Form validation with real-time feedback
+- Responsive design (desktop & mobile)
+- No AI-generated appearance (no emojis)
+
+---
+
+## 🏗️ Architecture
+
+### Backend Stack
+- **Framework**: FastAPI (async Python)
+- **Database**: SQLAlchemy ORM (SQLite dev, PostgreSQL prod)
+- **Authentication**: JWT + bcrypt (industry standard)
+- **Middleware**: Custom rate limiting & usage tracking
+- **API Docs**: Interactive Swagger UI at `/docs`
+
+### Frontend Stack
+- **Framework**: React 18
+- **Styling**: Tailwind CSS
+- **State Management**: React hooks
+- **Storage**: localStorage for tokens
+- **Build**: Create React App
+
+### Technology Stack
 
 **Backend:**
-- Python 3.9+
-- FastAPI
-- SQLAlchemy ORM
-- PostgreSQL (or SQLite for dev)
-- AsyncIO for concurrent operations
+- Python 3.8+
+- FastAPI 0.104+
+- SQLAlchemy 2.0+
+- python-jose 3.3+ (JWT)
+- passlib + bcrypt (password security)
+- Uvicorn (ASGI server)
 
 **Frontend:**
 - React 18
-- Vite
 - Tailwind CSS
-- Axios for API calls
+- JavaScript ES6+
+
+**Database:**
+- SQLite (development)
+- PostgreSQL (production)
 
 **Testing:**
 - pytest with async support
