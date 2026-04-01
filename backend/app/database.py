@@ -1,5 +1,4 @@
 import os
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from app.models import Base
@@ -7,22 +6,30 @@ from app.models import Base
 # Database URL from environment or default to SQLite for development
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./test.db")
 
+is_postgresql = "postgresql" in DATABASE_URL
+
 # For async support, we use asyncpg for PostgreSQL
-if "postgresql" in DATABASE_URL:
+if is_postgresql:
     # Convert postgresql:// to postgresql+asyncpg://
     ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    # PostgreSQL supports connection pooling
+    engine = create_async_engine(
+        ASYNC_DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        pool_size=5,
+        max_overflow=10,
+    )
 else:
-    # For SQLite, add aiosqlite support
+    # SQLite does NOT support pool_size/max_overflow — use NullPool to avoid issues
+    from sqlalchemy.pool import NullPool
     ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+    engine = create_async_engine(
+        ASYNC_DATABASE_URL,
+        echo=False,
+        poolclass=NullPool,
+    )
 
-# Create async engine
-engine = create_async_engine(
-    ASYNC_DATABASE_URL,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-)
 
 # Create session factory
 AsyncSessionLocal = sessionmaker(

@@ -25,9 +25,14 @@ app = FastAPI(
 )
 
 # Add CORS middleware
+# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per the CORS spec.
+# Must list allowed origins explicitly when credentials are enabled.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -158,26 +163,6 @@ async def log_customer_usage(
 # Include routers
 app.include_router(auth_router)  # Customer authentication routes
 app.include_router(router)  # Product routes
-            
-            return response
-            
-        except Exception as e:
-            # Log the error
-            process_time = (time.time() - start_time) * 1000
-            logger.error(f"Error processing request: {e}")
-            
-            asyncio.create_task(
-                log_request(request, api_key_id, 500, process_time, str(e))
-            )
-            raise
-            
-    except Exception as e:
-        logger.error(f"Middleware error: {e}")
-        raise
-
-
-# Include routes
-app.include_router(router)
 
 
 @app.on_event("startup")

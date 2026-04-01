@@ -70,8 +70,8 @@ async def get_products(
     max_price: Optional[float] = Query(None, ge=0),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
-    sort_by: str = Query("created_at", regex="^(price|created_at)$"),
-    sort_order: str = Query("desc", regex="^(asc|desc)$"),
+    sort_by: str = Query("created_at", pattern="^(price|created_at)$"),
+    sort_order: str = Query("desc", pattern="^(asc|desc)$"),
     db: AsyncSession = Depends(get_db)
 ):
     """Get products with filtering and pagination"""

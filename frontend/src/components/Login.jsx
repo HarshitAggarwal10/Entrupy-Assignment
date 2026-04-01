@@ -1,8 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 
 export default function Login({ onLoginSuccess }) {
-  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('login');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -48,10 +46,8 @@ export default function Login({ onLoginSuccess }) {
         localStorage.setItem('user', JSON.stringify(data.user));
         setSuccess(data.message);
         
-        // Callback to parent
+        // Callback to parent — App.jsx will switch to dashboard view
         onLoginSuccess(data.access_token, data.user);
-        
-        setTimeout(() => navigate('/dashboard'), 1000);
       } else {
         setError(data.detail || 'Login failed');
       }
@@ -102,10 +98,8 @@ export default function Login({ onLoginSuccess }) {
         localStorage.setItem('user', JSON.stringify(data.user));
         setSuccess(data.message);
         
-        // Callback to parent
+        // Callback to parent — App.jsx will switch to dashboard view
         onLoginSuccess(data.access_token, data.user);
-        
-        setTimeout(() => navigate('/dashboard'), 1000);
       } else {
         setError(data.detail || 'Registration failed');
       }
