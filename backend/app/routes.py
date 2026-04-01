@@ -253,3 +253,122 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
     """Get system statistics"""
     stats = await get_product_stats(db)
     return stats
+
+
+# API Key Management Endpoints
+@router.post("/api-keys", response_model=dict)
+async def create_api_key_endpoint(
+    name: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new API key for consumer"""
+    from app.auth import create_api_key
+    
+    key_value = await create_api_key(name, db)
+    
+    return {
+        "name": name,
+        "api_key": key_value,
+        "message": "API key created. Use this key in X-API-Key header.",
+        "warning": "Save this key securely. You won't be able to see it again."
+    }
+
+
+@router.get("/api-keys", response_model=dict)
+async def list_api_keys(db: AsyncSession = Depends(get_db)):
+    """List all API keys (masking sensitive values)"""
+    stmt = select(APIKey).where(APIKey.is_active == True)
+    result = await db.execute(stmt)
+    keys = result.scalars().all()
+    
+    return {
+        "total": len(keys),
+        "keys": [
+            {
+                "id": k.id,
+                "name": k.name,
+                "created_at": k.created_at.isoformat(),
+                "last_used": k.last_used.isoformat() if k.last_used else None,
+                "key": f"{k.key[:8]}...{k.key[-4:]}"  # Masked
+            }
+            for k in keys
+        ]
+    }
+
+
+@router.get("/api-keys/{key_id}/usage", response_model=dict)
+async def get_api_key_usage_endpoint(
+    key_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Get usage statistics for an API key"""
+    from app.auth import get_api_key_usage
+    
+    stmt = select(APIKey).where(APIKey.id == key_id)
+    result = await db.execute(stmt)
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    usage = await get_api_key_usage(key_id, db)
+    return usage
+
+
+@router.post("/api-keys/{key_id}/revoke", response_model=dict)
+async def revoke_api_key(
+    key_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """Revoke an API key"""
+    stmt = select(APIKey).where(APIKey.id == key_id)
+    result = await db.execute(stmt)
+    api_key = result.scalar_one_or_none()
+    
+    if not api_key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    
+    api_key.is_active = False
+    db.add(api_key)
+    await db.commit()
+    
+    return {"message": f"API key '{api_key.name}' has been revoked"}
+
+
+@router.get("/request-logs", response_model=dict)
+async def get_request_logs(
+    api_key_id: Optional[str] = Query(None),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get request logs (admin endpoint)"""
+    query = select(RequestLog)
+    
+    if api_key_id:
+        query = query.where(RequestLog.api_key_id == api_key_id)
+    
+    # Get total count
+    count_result = await db.execute(select(func.count(RequestLog.id)).select_from(query.subquery()))
+    total_count = count_result.scalar() or 0
+    
+    # Apply sorting and pagination
+    query = query.order_by(RequestLog.timestamp.desc()).offset(skip).limit(limit)
+    
+    result = await db.execute(query)
+    logs = result.scalars().all()
+    
+    return {
+        "total": total_count,
+        "skip": skip,
+        "limit": limit,
+        "logs": [
+            {
+                "method": log.method,
+                "path": log.path,
+                "status_code": log.status_code,
+                "response_time_ms": log.response_time_ms,
+                "timestamp": log.timestamp.isoformat(),
+                "api_key_id": log.api_key_id
+            }
+            for log in logs
+        ]
+    }
