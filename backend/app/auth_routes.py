@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Header
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
 from datetime import datetime, timedelta
@@ -21,10 +21,10 @@ auth_router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
 
 async def get_current_user(
-    authorization: str = None,
+    authorization: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db)
 ) -> User:
-    """Get current authenticated user from JWT token"""
+    """Get current authenticated user from JWT token in Authorization header"""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -55,10 +55,13 @@ async def register(
 ):
     """Register a new customer account"""
     
+    logger.info(f"Registration attempt for username: {user_data.username}, email: {user_data.email}")
+    
     # Check if username exists
     stmt = select(User).where(User.username == user_data.username)
     existing_user = await db.execute(stmt)
     if existing_user.scalar_one_or_none():
+        logger.warning(f"Registration failed: Username already exists - {user_data.username}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username already registered"
@@ -68,17 +71,21 @@ async def register(
     stmt = select(User).where(User.email == user_data.email)
     existing_email = await db.execute(stmt)
     if existing_email.scalar_one_or_none():
+        logger.warning(f"Registration failed: Email already exists - {user_data.email}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered"
         )
+    
+    # Hash password
+    hashed_pwd = hash_password(user_data.password)
     
     # Create new user
     new_user = User(
         username=user_data.username,
         email=user_data.email,
         full_name=user_data.full_name,
-        hashed_password=hash_password(user_data.password),
+        hashed_password=hashed_pwd,
         last_login=datetime.utcnow()
     )
     
@@ -86,7 +93,7 @@ async def register(
     await db.commit()
     await db.refresh(new_user)
     
-    logger.info(f"New user registered: {new_user.username}")
+    logger.info(f"User registered successfully: {new_user.username} (ID: {new_user.id})")
     
     # Create JWT token
     access_token = create_access_token(data={"sub": new_user.id})
@@ -106,18 +113,30 @@ async def login(
 ):
     """Login customer and get JWT token"""
     
+    logger.info(f"Login attempt for username: {credentials.username}")
+    
     # Find user
     stmt = select(User).where(User.username == credentials.username)
     result = await db.execute(stmt)
     user = result.scalar_one_or_none()
     
-    if not user or not verify_password(credentials.password, user.hashed_password):
+    if not user:
+        logger.warning(f"Login failed: User not found - {credentials.username}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password"
+        )
+    
+    # Verify password
+    if not verify_password(credentials.password, user.hashed_password):
+        logger.warning(f"Login failed: Invalid password for user - {credentials.username}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password"
         )
     
     if not user.is_active:
+        logger.warning(f"Login failed: User account inactive - {credentials.username}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated"
@@ -128,7 +147,7 @@ async def login(
     db.add(user)
     await db.commit()
     
-    logger.info(f"User logged in: {user.username}")
+    logger.info(f"User logged in successfully: {user.username}")
     
     # Create JWT token
     access_token = create_access_token(data={"sub": user.id})
@@ -143,21 +162,18 @@ async def login(
 
 @auth_router.get("/me", response_model=UserResponse)
 async def get_current_user_profile(
-    authorization: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
+    user: User = Depends(get_current_user)
 ):
     """Get current user profile"""
-    user = await get_current_user(authorization, db)
     return UserResponse.from_orm(user)
 
 
 @auth_router.get("/usage", response_model=UserUsageResponse)
 async def get_user_usage(
-    authorization: Optional[str] = None,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get user's API usage statistics and limits"""
-    user = await get_current_user(authorization, db)
     
     # Get usage stats
     stmt = select(func.count(UserUsageLog.id)).where(UserUsageLog.user_id == user.id)
@@ -217,13 +233,12 @@ async def get_user_usage(
 
 @auth_router.get("/usage/history")
 async def get_usage_history(
-    authorization: Optional[str] = None,
+    user: User = Depends(get_current_user),
     skip: int = 0,
     limit: int = 50,
     db: AsyncSession = Depends(get_db)
 ):
     """Get detailed usage history for user"""
-    user = await get_current_user(authorization, db)
     
     # Get usage logs
     stmt = select(UserUsageLog).where(
@@ -257,11 +272,10 @@ async def get_usage_history(
 
 @auth_router.post("/refresh-token", response_model=dict)
 async def refresh_token(
-    authorization: Optional[str] = None,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Refresh JWT token"""
-    user = await get_current_user(authorization, db)
     
     access_token = create_access_token(data={"sub": user.id})
     
@@ -274,11 +288,10 @@ async def refresh_token(
 
 @auth_router.post("/logout", response_model=dict)
 async def logout(
-    authorization: Optional[str] = None,
+    user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Logout user (client should discard token)"""
-    user = await get_current_user(authorization, db)
     
     logger.info(f"User logged out: {user.username}")
     

@@ -6,6 +6,7 @@ export default function Login({ onLoginSuccess }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [showCacheCleared, setShowCacheCleared] = useState(false);
 
   // Login form state
   const [loginForm, setLoginForm] = useState({
@@ -22,10 +23,22 @@ export default function Login({ onLoginSuccess }) {
     full_name: '',
   });
 
+  const clearBrowserCache = () => {
+    // Clear all storage
+    localStorage.clear();
+    sessionStorage.clear();
+    // Reload page
+    setShowCacheCleared(true);
+    setTimeout(() => {
+      window.location.reload();
+    }, 1000);
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     try {
       const data = await authService.login(loginForm.username, loginForm.password);
@@ -47,6 +60,7 @@ export default function Login({ onLoginSuccess }) {
     e.preventDefault();
     setLoading(true);
     setError(null);
+    setSuccess(null);
 
     if (registerForm.password !== registerForm.confirmPassword) {
       setError('Passwords do not match');
@@ -85,6 +99,25 @@ export default function Login({ onLoginSuccess }) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4">
       <div className="w-full max-w-md bg-white rounded-lg shadow-lg p-8">
+        {/* Cache Cleared Message */}
+        {showCacheCleared && (
+          <div className="mb-4 p-3 bg-green-100 border border-green-400 text-green-700 rounded">
+            ✅ Cache cleared successfully! Reloading...
+          </div>
+        )}
+
+        {/* Clear Cache Button */}
+        <div className="mb-6 flex justify-end">
+          <button
+            type="button"
+            onClick={clearBrowserCache}
+            title="Clear browser cache and localStorage"
+            className="px-3 py-2 rounded-md text-xs font-medium text-orange-600 hover:bg-orange-50 transition border border-orange-200"
+          >
+            🗑️ Clear Cache
+          </button>
+        </div>
+
         {/* Tabs */}
         <div className="flex gap-4 mb-8">
           <button

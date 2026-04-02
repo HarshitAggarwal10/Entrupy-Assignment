@@ -129,6 +129,15 @@ export const productService = {
   health: () => {
     return api.get('/health');
   },
+
+  // API Usage tracking methods
+  getUserUsageStats: () => {
+    return api.get('/auth/usage');
+  },
+
+  getUserUsageHistory: (skip = 0, limit = 15) => {
+    return api.get(`/auth/usage/history?skip=${skip}&limit=${limit}`);
+  },
 };
 
 export default api;

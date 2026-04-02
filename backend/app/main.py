@@ -39,10 +39,35 @@ app.add_middleware(
 @app.middleware("http")
 async def track_customer_usage(request: Request, call_next):
     """
-    Per-request middleware that:
-    1. Validates JWT token (if present)
-    2. Enforces daily / monthly rate limits
-    3. Logs usage to user_usage_logs table (async, non-blocking)
+    Per-customer usage tracking and rate limiting middleware.
+    
+    Executes for EVERY request to:
+    1. Extract and validate JWT token (Bearer {token})
+    2. Check daily rate limit (default: 1,000 requests/day per customer)
+    3. Check monthly rate limit (default: 50,000 requests/month per customer)
+    4. Log usage asynchronously to user_usage_logs table (non-blocking)
+    
+    Rate Limits:
+    - Daily: Based on timestamp >= today at 00:00 UTC
+    - Monthly: Based on timestamp >= 1st of month at 00:00 UTC
+    
+    Resets:
+    - Daily: Automatically at midnight UTC
+    - Monthly: Automatically on 1st of each month UTC
+    
+    Logged Details (stored in user_usage_logs):
+    - user_id: Customer ID from JWT token
+    - endpoint: Extracted endpoint name for analytics
+    - method: HTTP method (GET, POST, PUT, DELETE, etc.)
+    - path: Full URL path with query string
+    - status_code: HTTP response status
+    - response_time_ms: Request processing time
+    - request_size_kb: Request body size (optional)
+    - response_size_kb: Response body size (optional)
+    - ip_address: Client IP address
+    - user_agent: Client user agent string
+    - query_params: URL query parameters as JSON dict
+    - timestamp: Precise request completion time (UTC)
     """
     start_time = time.time()
     user_id: Optional[str] = None
@@ -66,6 +91,7 @@ async def track_customer_usage(request: Request, call_next):
                 if not user:
                     raise HTTPException(status_code=401, detail="User not found")
 
+                # ===== DAILY RATE LIMIT CHECK =====
                 today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
                 count_result = await db.execute(
                     select(func.count(UserUsageLog.id)).where(
@@ -73,12 +99,14 @@ async def track_customer_usage(request: Request, call_next):
                         UserUsageLog.timestamp >= today_start,
                     )
                 )
-                if (count_result.scalar() or 0) >= user.max_requests_per_day:
+                daily_requests = count_result.scalar() or 0
+                if daily_requests >= user.max_requests_per_day:
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Daily limit of {user.max_requests_per_day} requests exceeded",
+                        detail=f"Daily limit of {user.max_requests_per_day} requests exceeded. Resets at midnight UTC.",
                     )
 
+                # ===== MONTHLY RATE LIMIT CHECK =====
                 month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
                 count_result = await db.execute(
                     select(func.count(UserUsageLog.id)).where(
@@ -86,10 +114,11 @@ async def track_customer_usage(request: Request, call_next):
                         UserUsageLog.timestamp >= month_start,
                     )
                 )
-                if (count_result.scalar() or 0) >= user.max_requests_per_month:
+                monthly_requests = count_result.scalar() or 0
+                if monthly_requests >= user.max_requests_per_month:
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Monthly limit of {user.max_requests_per_month} requests exceeded",
+                        detail=f"Monthly limit of {user.max_requests_per_month} requests exceeded. Resets on the 1st of each month UTC.",
                     )
 
         except HTTPException:
@@ -127,7 +156,23 @@ async def _log_customer_usage(
     status_code: int,
     response_time_ms: float,
 ):
-    """Async fire-and-forget: write one row to user_usage_logs."""
+    """
+    Async fire-and-forget: write one row to user_usage_logs.
+    
+    Per-request usage tracking for API quota enforcement and analytics.
+    Captures all request/response details for customer usage analysis.
+    
+    Tracked fields:
+    - endpoint: Extracted endpoint name (e.g., "products", "analytics")
+    - method: HTTP method (GET, POST, etc.)
+    - path: Full URL path (e.g., /api/products?brand=Chanel)
+    - status_code: HTTP response status (200, 404, 429, etc.)
+    - response_time_ms: Response latency in milliseconds
+    - ip_address: Client IP address
+    - user_agent: Browser/client user agent string
+    - query_params: URL query parameters as JSON
+    - timestamp: Request completion time (UTC)
+    """
     try:
         from app.database import AsyncSessionLocal
         from app.models import UserUsageLog
@@ -144,6 +189,7 @@ async def _log_customer_usage(
                     ip_address=request.client.host if request.client else None,
                     user_agent=request.headers.get("user-agent"),
                     query_params=dict(request.query_params) or None,
+                    timestamp=datetime.utcnow(),  # Explicit timestamp for accuracy
                 )
             )
             await db.commit()
