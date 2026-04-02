@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-PostgreSQL Setup Script
-Sets up database and initializes schema
-"""
-
 import asyncio
 import os
 from getpass import getpass

@@ -1,9 +1,3 @@
-#!/usr/bin/env python
-"""
-Comprehensive Authentication and Usage Tracking Test Suite
-Tests customer registration, login, and API usage tracking
-"""
-
 import requests
 import json
 from datetime import datetime

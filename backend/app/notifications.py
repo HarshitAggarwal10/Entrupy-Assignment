@@ -1,15 +1,3 @@
-"""
-Notification system for price change events.
-
-Design:
-- NotificationEvent rows are written to DB *before* dispatch (don't lose events)
-- Delivery runs in background tasks (don't block the fetch process)
-- Each handler runs with exponential-backoff retry (handle delivery failures)
-- Events are only marked is_processed=True when ALL handlers succeed
-- Every attempt (success or failure) is persisted to NotificationDeliveryLog (DB-backed audit trail)
-- Webhook handler raises on failure so the retry mechanism can intervene
-"""
-
 import logging
 import json
 import asyncio

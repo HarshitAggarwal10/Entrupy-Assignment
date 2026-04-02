@@ -1,8 +1,3 @@
-"""
-Authentication and request logging utilities
-Manages API key validation, request logging, and usage tracking
-"""
-
 import uuid
 import logging
 from typing import Optional, Tuple

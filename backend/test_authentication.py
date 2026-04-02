@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Comprehensive Authentication & API Testing Script
-Tests all authentication features and API usage tracking
-"""
-
 import requests
 import json
 import time

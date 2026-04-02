@@ -12,18 +12,12 @@ from app.routes import router
 from app.auth_routes import auth_router, get_current_user
 from app.database import init_db
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# App
-# ---------------------------------------------------------------------------
 app = FastAPI(
     title="Product Price Monitoring System",
     description="Track product prices across Grailed, Fashionphile, and 1stDibs "
@@ -31,11 +25,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# ---------------------------------------------------------------------------
-# CORS
-# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per
-# the CORS spec. We list origins explicitly so credentials work correctly.
-# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -47,9 +36,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# Request-tracking middleware (JWT-authenticated customers)
-# ---------------------------------------------------------------------------
 @app.middleware("http")
 async def track_customer_usage(request: Request, call_next):
     """
@@ -202,16 +188,9 @@ async def _log_api_key_request(
     except Exception as e:
         logger.error(f"Failed to log API key request: {e}")
 
-# ---------------------------------------------------------------------------
-# Routers
-# ---------------------------------------------------------------------------
 app.include_router(auth_router)   # /api/auth/*
 app.include_router(router)        # /api/*
 
-
-# ---------------------------------------------------------------------------
-# Startup
-# ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
     """
@@ -249,9 +228,6 @@ async def startup_event():
     logger.info("=" * 60)
 
 
-# ---------------------------------------------------------------------------
-# Health / root
-# ---------------------------------------------------------------------------
 @app.get("/")
 async def root():
     return {

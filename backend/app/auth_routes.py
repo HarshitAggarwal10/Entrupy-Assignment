@@ -1,7 +1,3 @@
-"""
-Customer authentication routes
-"""
-
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
