@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, BackgroundTasks, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 from typing import List, Optional
@@ -21,6 +21,7 @@ from app.schemas import (
 )
 from app.import_products import load_products_from_json_files, get_product_stats
 from app.notifications import notification_manager
+from app.auth import validate_api_key
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["products"])
@@ -29,6 +30,7 @@ router = APIRouter(prefix="/api", tags=["products"])
 @router.post("/data/refresh", response_model=DataRefreshResponse)
 async def refresh_data(
     background_tasks: BackgroundTasks,
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Trigger data refresh from sample products"""
@@ -72,6 +74,7 @@ async def get_products(
     limit: int = Query(50, ge=1, le=100),
     sort_by: str = Query("created_at", pattern="^(price|created_at)$"),
     sort_order: str = Query("desc", pattern="^(asc|desc)$"),
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Get products with filtering and pagination"""
@@ -124,6 +127,7 @@ async def get_products(
 @router.get("/products/{product_id}", response_model=ProductResponse)
 async def get_product(
     product_id: str,
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Get a specific product with price history"""
@@ -141,6 +145,7 @@ async def get_product(
 async def get_price_history(
     product_id: str,
     limit: int = Query(50, ge=1, le=100),
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Get price history for a product"""
@@ -163,6 +168,7 @@ async def get_price_history(
 
 @router.get("/analytics", response_model=AnalyticsResponse)
 async def get_analytics(
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Get aggregate analytics"""
@@ -184,6 +190,7 @@ async def get_notifications(
     is_processed: Optional[bool] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
+    api_key_id: Optional[str] = Depends(validate_api_key),
     db: AsyncSession = Depends(get_db)
 ):
     """Get notification events"""

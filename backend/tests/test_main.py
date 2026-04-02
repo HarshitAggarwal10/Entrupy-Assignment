@@ -1,306 +1,347 @@
 import pytest
 import asyncio
-from httpx import AsyncClient
+from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.main import app
-from app.database import get_db, Base
-from app.models import Product, PriceHistory, NotificationEvent
-from app.import_products import normalize_product_data, load_products_from_json_files
-from app.notifications import notification_manager
+from app.database import get_db
+from app.models import Base, Product, PriceHistory, NotificationEvent, NotificationDeliveryLog
+from app.import_products import normalize_product_data
+from app.notifications import NotificationManager
 from datetime import datetime
 
 
-# Test database setup
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
 @pytest.fixture
 async def test_db():
-    """Create test database"""
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        echo=False,
-    )
-    
+    """Isolated in-memory SQLite DB per test."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    TestSessionLocal = sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
+
+    TestSessionLocal = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
     async def override_get_db():
         async with TestSessionLocal() as session:
             yield session
-    
+
     app.dependency_overrides[get_db] = override_get_db
-    
     yield TestSessionLocal
-    
     await engine.dispose()
     app.dependency_overrides.clear()
 
 
 @pytest.fixture
 async def client(test_db):
-    """Create test client"""
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    """HTTPX async test client wired to in-memory DB."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
         yield ac
 
 
-# Test 1: Product normalization from different sources
+# ---------------------------------------------------------------------------
+# Test 1: Normalize 1stdibs
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_normalize_product_1stdibs():
-    """Test product normalization for 1stdibs source"""
-    raw_data = {
+    """Product normalization extracts all fields for 1stdibs source."""
+    raw = {
         "product_url": "https://www.1stdibs.com/product123",
-        "model": "Test Model",
-        "price": 100.0,
-        "brand": "Test Brand",
-        "size": "M",
-        "full_description": "Test description",
-        "main_images": [{"url": "https://example.com/image.jpg"}]
+        "model": "Chanel Flap Bag",
+        "price": 4500.0,
+        "brand": "Chanel",
+        "size": "Medium",
+        "full_description": "Authentic Chanel bag",
+        "main_images": [{"url": "https://example.com/img.jpg"}],
     }
-    
-    normalized = normalize_product_data("1stdibs", raw_data)
-    
+    normalized = normalize_product_data("1stdibs", raw)
+
     assert normalized is not None
     assert normalized["url"] == "https://www.1stdibs.com/product123"
-    assert normalized["name"] == "Test Model"
-    assert normalized["price"] == 100.0
-    assert normalized["brand"] == "Test Brand"
+    assert normalized["name"] == "Chanel Flap Bag"
+    assert normalized["price"] == 4500.0
+    assert normalized["brand"] == "Chanel"
     assert normalized["source"] == "1stdibs"
+    assert normalized["main_image_url"] == "https://example.com/img.jpg"
 
 
-# Test 2: Product normalization for fashionphile
+# ---------------------------------------------------------------------------
+# Test 2: Normalize fashionphile
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_normalize_product_fashionphile():
-    """Test product normalization for fashionphile source"""
-    raw_data = {
+    """Product normalization extracts condition and brand for fashionphile."""
+    raw = {
         "product_url": "https://www.fashionphile.com/product123",
-        "product_id": "fancy-id",
-        "brand_id": "tiffany",
-        "price": 500.0,
-        "condition": "Shows Wear",
-        "image_url": "https://example.com/image.jpg",
-        "metadata": {"description": "Test description"}
+        "product_id": "fph-123",
+        "brand_id": "louis-vuitton",
+        "price": 1200.0,
+        "condition": "Excellent",
+        "image_url": "https://example.com/img.jpg",
+        "metadata": {"description": "LV Neverfull MM"},
     }
-    
-    normalized = normalize_product_data("fashionphile", raw_data)
-    
+    normalized = normalize_product_data("fashionphile", raw)
+
     assert normalized is not None
-    assert normalized["price"] == 500.0
+    assert normalized["price"] == 1200.0
     assert normalized["source"] == "fashionphile"
-    assert normalized["condition"] == "Shows Wear"
-    assert normalized["brand"] == "tiffany"
+    assert normalized["condition"] == "Excellent"
+    assert normalized["brand"] == "louis-vuitton"
 
 
-# Test 3: Product normalization for grailed
+# ---------------------------------------------------------------------------
+# Test 3: Normalize grailed
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_normalize_product_grailed():
-    """Test product normalization for grailed source"""
-    raw_data = {
+    """Product normalization works for grailed source."""
+    raw = {
         "product_url": "https://www.grailed.com/listings/123",
-        "model": "Washed T-Shirt",
+        "model": "Washed Tee",
         "brand": "Amiri",
-        "price": 250.0,
-        "image_url": "https://example.com/image.jpg",
-        "metadata": {}
+        "price": 350.0,
+        "image_url": "https://example.com/img.jpg",
+        "metadata": {"condition": "Used"},
     }
-    
-    normalized = normalize_product_data("grailed", raw_data)
-    
+    normalized = normalize_product_data("grailed", raw)
+
     assert normalized is not None
     assert normalized["source"] == "grailed"
-    assert normalized["price"] == 250.0
+    assert normalized["price"] == 350.0
     assert normalized["brand"] == "Amiri"
 
 
-# Test 4: Health check endpoint
+# ---------------------------------------------------------------------------
+# Test 4: Normalize — missing price returns None gracefully
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_normalize_missing_price_returns_none():
+    """normalize_product_data returns None when price is absent (bad input)."""
+    raw = {"product_url": "https://www.grailed.com/listings/999", "model": "No Price Item"}
+    assert normalize_product_data("grailed", raw) is None
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Health check
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_health_check(client):
-    """Test health check endpoint"""
+    """Health endpoint returns healthy status."""
     response = await client.get("/health")
-    
     assert response.status_code == 200
-    assert response.json()["status"] == "ok"
+    assert response.json()["status"] == "healthy"
 
 
-# Test 5: Get empty products list
+# ---------------------------------------------------------------------------
+# Test 6: Products list — empty DB
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_get_products_empty(client):
-    """Test getting products when none exist"""
+    """Product list endpoint returns empty result on fresh DB."""
     response = await client.get("/api/products")
-    
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 0
     assert data["data"] == []
 
 
-# Test 6: Create and retrieve product
+# ---------------------------------------------------------------------------
+# Test 7: Create product, retrieve by ID
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_create_and_retrieve_product(test_db, client):
-    """Test creating and retrieving a product"""
-    # First, we need to add a product to the database
+    """Product created in DB is retrievable via GET /api/products/{id}."""
     async with test_db() as session:
         product = Product(
-            url="https://example.com/product1",
-            name="Test Product",
-            brand="Test Brand",
-            category="Electronics",
-            source="grailed",
-            price=99.99,
-            description="A test product"
+            url="https://example.com/bag-001",
+            name="Hermès Birkin 30",
+            brand="Hermès",
+            category="Bags",
+            source="1stdibs",
+            price=18000.0,
         )
         session.add(product)
         await session.commit()
         product_id = product.id
-    
-    # Now retrieve it via API
+
     response = await client.get(f"/api/products/{product_id}")
-    
     assert response.status_code == 200
     data = response.json()
-    assert data["name"] == "Test Product"
-    assert data["price"] == 99.99
-    assert data["brand"] == "Test Brand"
+    assert data["name"] == "Hermès Birkin 30"
+    assert data["price"] == 18000.0
+    assert data["brand"] == "Hermès"
 
 
-# Test 7: Filter products by price range
+# ---------------------------------------------------------------------------
+# Test 8: Filter products by price range
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_filter_products_by_price(test_db, client):
-    """Test filtering products by price range"""
-    # Add test products
+    """Price range filter returns only matching products."""
     async with test_db() as session:
-        products_data = [
-            {"url": "https://example.com/p1", "name": "Cheap Product", "price": 10.0},
-            {"url": "https://example.com/p2", "name": "Medium Product", "price": 50.0},
-            {"url": "https://example.com/p3", "name": "Expensive Product", "price": 200.0},
-        ]
-        
-        for data in products_data:
-            product = Product(
-                url=data["url"],
-                name=data["name"],
-                source="test",
-                price=data["price"]
-            )
-            session.add(product)
+        for url, name, price in [
+            ("https://ex.com/p1", "Budget Tee", 20.0),
+            ("https://ex.com/p2", "Mid Jacket", 300.0),
+            ("https://ex.com/p3", "Luxury Watch", 5000.0),
+        ]:
+            session.add(Product(url=url, name=name, source="grailed", price=price))
         await session.commit()
-    
-    # Test filter
-    response = await client.get("/api/products?min_price=30&max_price=100")
-    
+
+    response = await client.get("/api/products?min_price=100&max_price=999")
     assert response.status_code == 200
     data = response.json()
     assert data["total"] == 1
-    assert data["data"][0]["name"] == "Medium Product"
+    assert data["data"][0]["name"] == "Mid Jacket"
 
 
-# Test 8: Price history tracking
+# ---------------------------------------------------------------------------
+# Test 9: Price history tracking
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_price_history_tracking(test_db):
-    """Test price history tracking for products"""
+    """PriceHistory rows are written and retrievable for a product."""
+    from sqlalchemy import select
+
     async with test_db() as session:
-        # Create a product
         product = Product(
-            url="https://example.com/product",
-            name="Test Product",
-            source="test",
-            price=100.0
+            url="https://ex.com/watch-001",
+            name="Rolex Submariner",
+            source="fashionphile",
+            price=12000.0,
         )
         session.add(product)
         await session.flush()
-        
-        # Add price history entries
-        history1 = PriceHistory(
-            product_id=product.id,
-            old_price=None,
-            new_price=100.0,
-            change_reason="initial_import"
-        )
-        history2 = PriceHistory(
-            product_id=product.id,
-            old_price=100.0,
-            new_price=85.0,
-            change_percentage=-15.0,
-            change_reason="price_drop"
-        )
-        session.add(history1)
-        session.add(history2)
+
+        session.add(PriceHistory(product_id=product.id, old_price=None, new_price=12000.0, change_reason="initial_import"))
+        session.add(PriceHistory(product_id=product.id, old_price=12000.0, new_price=10500.0, change_percentage=-12.5, change_reason="price_drop"))
         await session.commit()
-        
-        # Verify price history
-        from sqlalchemy import select
-        history_stmt = select(PriceHistory).where(PriceHistory.product_id == product.id)
-        result = await session.execute(history_stmt)
-        histories = result.scalars().all()
-        
-        assert len(histories) == 2
-        assert histories[1].new_price == 85.0
-        assert histories[1].change_percentage == -15.0
+
+        result = await session.execute(select(PriceHistory).where(PriceHistory.product_id == product.id))
+        rows = result.scalars().all()
+
+    assert len(rows) == 2
+    drop = next(r for r in rows if r.change_percentage is not None)
+    assert drop.new_price == 10500.0
+    assert drop.change_percentage == -12.5
 
 
-# Test 9: Analytics endpoint
+# ---------------------------------------------------------------------------
+# Test 10: Analytics endpoint
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_analytics_endpoint(test_db, client):
-    """Test analytics endpoint"""
-    # Add test products
+    """Analytics endpoint aggregates totals by source correctly."""
     async with test_db() as session:
-        for i in range(3):
-            product = Product(
-                url=f"https://example.com/p{i}",
-                name=f"Product {i}",
-                brand="Brand A" if i < 2 else "Brand B",
-                category="Category 1",
-                source="grailed" if i < 2 else "fashionphile",
-                price=50.0 + (i * 10)
-            )
-            session.add(product)
+        session.add(Product(url="https://ex.com/a1", name="A1", brand="BrandA", category="Bags", source="grailed", price=100.0))
+        session.add(Product(url="https://ex.com/a2", name="A2", brand="BrandA", category="Bags", source="grailed", price=200.0))
+        session.add(Product(url="https://ex.com/a3", name="A3", brand="BrandB", category="Watches", source="1stdibs", price=500.0))
         await session.commit()
-    
-    # Test analytics
+
     response = await client.get("/api/analytics")
-    
     assert response.status_code == 200
     data = response.json()
     assert data["total_products"] == 3
-    assert "products_by_source" in data
+    assert data["products_by_source"]["grailed"] == 2
+    assert data["products_by_source"]["1stdibs"] == 1
     assert "price_statistics" in data
+    assert "average_prices_by_category" in data
 
 
-# Test 10: Notification events (Bonus test)
+# ---------------------------------------------------------------------------
+# Test 11: Notification event created on price change
+# ---------------------------------------------------------------------------
 @pytest.mark.asyncio
-async def test_notification_events(test_db):
-    """Test notification event creation"""
+async def test_notification_event_created(test_db):
+    """NotificationEvent row is written and starts as unprocessed."""
+    from sqlalchemy import select
+
     async with test_db() as session:
-        # Create a product
-        product = Product(
-            url="https://example.com/product",
-            name="Test Product",
-            source="test",
-            price=100.0
-        )
+        product = Product(url="https://ex.com/n1", name="Test Bag", source="grailed", price=500.0)
         session.add(product)
         await session.flush()
-        
-        # Create a notification event
+
         event = NotificationEvent(
             product_id=product.id,
             event_type="price_drop",
-            old_price=100.0,
-            new_price=80.0,
-            change_percentage=-20.0
+            old_price=500.0,
+            new_price=400.0,
+            change_percentage=-20.0,
         )
         session.add(event)
         await session.commit()
-        
-        # Verify event
-        from sqlalchemy import select
-        event_stmt = select(NotificationEvent).where(NotificationEvent.product_id == product.id)
-        result = await session.execute(event_stmt)
-        retrieved_event = result.scalar_one()
-        
-        assert retrieved_event.event_type == "price_drop"
-        assert retrieved_event.change_percentage == -20.0
-        assert retrieved_event.is_processed == False
+
+        result = await session.execute(select(NotificationEvent).where(NotificationEvent.product_id == product.id))
+        retrieved = result.scalar_one()
+
+    assert retrieved.event_type == "price_drop"
+    assert retrieved.change_percentage == -20.0
+    assert retrieved.is_processed is False
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Notification retry — delivery log persisted, event stays unprocessed
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_notification_retry_and_delivery_log(test_db):
+    """
+    When a handler fails all retries:
+    - NotificationDeliveryLog rows are written for every attempt
+    - The event stays unprocessed (is_processed stays False)
+    """
+    from sqlalchemy import select
+    import app.notifications as notif_module
+
+    # Speed up retries for test
+    original_delays = notif_module.RETRY_DELAYS
+    notif_module.RETRY_DELAYS = [0, 0, 0]
+
+    class AlwaysFailHandler:
+        async def __call__(self, payload):
+            raise RuntimeError("Simulated failure")
+
+    async with test_db() as session:
+        product = Product(url="https://ex.com/retry1", name="Retry Test", source="grailed", price=200.0)
+        session.add(product)
+        await session.flush()
+
+        event = NotificationEvent(
+            product_id=product.id,
+            event_type="price_drop",
+            old_price=200.0,
+            new_price=150.0,
+            change_percentage=-25.0,
+        )
+        session.add(event)
+        await session.commit()
+
+        mgr = NotificationManager()
+        mgr.register_handler(AlwaysFailHandler())
+        await mgr.send_notifications(session)
+
+        await session.refresh(event)
+        logs_result = await session.execute(
+            select(NotificationDeliveryLog).where(NotificationDeliveryLog.event_id == event.id)
+        )
+        logs = logs_result.scalars().all()
+
+    notif_module.RETRY_DELAYS = original_delays
+
+    assert event.is_processed is False, "Event must stay unprocessed when handler fails"
+    assert len(logs) == 3, f"Expected 3 delivery log rows (one per retry), got {len(logs)}"
+    assert all(not log.success for log in logs), "All attempts should be marked as failures"
+
+
+# ---------------------------------------------------------------------------
+# Test 13: Product not found returns 404
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_product_not_found(client):
+    """Invalid product ID returns 404 with proper error message."""
+    response = await client.get("/api/products/nonexistent-id-12345")
+    assert response.status_code == 404
+    assert "not found" in response.json()["detail"].lower()

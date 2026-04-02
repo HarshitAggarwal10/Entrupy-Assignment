@@ -1,32 +1,41 @@
-from fastapi import FastAPI, Request, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-import logging
+import os
 import time
 import asyncio
+import logging
 from datetime import datetime
 from typing import Optional
+
+from fastapi import FastAPI, Request, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+
 from app.routes import router
 from app.auth_routes import auth_router, get_current_user
 from app.database import init_db
 
-# Configure logging
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
-
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# ---------------------------------------------------------------------------
+# App
+# ---------------------------------------------------------------------------
 app = FastAPI(
     title="Product Price Monitoring System",
-    description="Track product prices across multiple marketplaces with customer authentication",
-    version="1.0.0"
+    description="Track product prices across Grailed, Fashionphile, and 1stDibs "
+                "with price history, analytics, notifications, and API-key auth.",
+    version="1.0.0",
 )
 
-# Add CORS middleware
-# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per the CORS spec.
-# Must list allowed origins explicitly when credentials are enabled.
+# ---------------------------------------------------------------------------
+# CORS
+# NOTE: allow_origins=["*"] is incompatible with allow_credentials=True per
+# the CORS spec. We list origins explicitly so credentials work correctly.
+# ---------------------------------------------------------------------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
@@ -38,18 +47,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# Customer request tracking middleware
+# ---------------------------------------------------------------------------
+# Request-tracking middleware (JWT-authenticated customers)
+# ---------------------------------------------------------------------------
 @app.middleware("http")
 async def track_customer_usage(request: Request, call_next):
     """
-    Middleware to track customer API usage and enforce rate limits
-    Logs every request to UserUsageLog table
+    Per-request middleware that:
+    1. Validates JWT token (if present)
+    2. Enforces daily / monthly rate limits
+    3. Logs usage to user_usage_logs table (async, non-blocking)
     """
     start_time = time.time()
-    user_id = None
-    
-    # Extract authorization token if present
+    user_id: Optional[str] = None
+
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         try:
@@ -58,151 +69,204 @@ async def track_customer_usage(request: Request, call_next):
             from app.database import AsyncSessionLocal
             from app.models import User, UserUsageLog
             from sqlalchemy import select, func
-            
+
             user_id = get_user_from_token(token)
-            
-            # Check rate limits in background
+
             async with AsyncSessionLocal() as db:
-                # Get user
                 stmt = select(User).where(User.id == user_id, User.is_active == True)
                 result = await db.execute(stmt)
                 user = result.scalar_one_or_none()
-                
+
                 if not user:
                     raise HTTPException(status_code=401, detail="User not found")
-                
-                # Check daily limit
+
                 today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-                stmt = select(func.count(UserUsageLog.id)).where(
-                    UserUsageLog.user_id == user_id,
-                    UserUsageLog.timestamp >= today_start
+                count_result = await db.execute(
+                    select(func.count(UserUsageLog.id)).where(
+                        UserUsageLog.user_id == user_id,
+                        UserUsageLog.timestamp >= today_start,
+                    )
                 )
-                count_result = await db.execute(stmt)
-                requests_today = count_result.scalar() or 0
-                
-                if requests_today >= user.max_requests_per_day:
+                if (count_result.scalar() or 0) >= user.max_requests_per_day:
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Daily limit of {user.max_requests_per_day} requests exceeded"
+                        detail=f"Daily limit of {user.max_requests_per_day} requests exceeded",
                     )
-                
-                # Check monthly limit
+
                 month_start = datetime.utcnow().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                stmt = select(func.count(UserUsageLog.id)).where(
-                    UserUsageLog.user_id == user_id,
-                    UserUsageLog.timestamp >= month_start
+                count_result = await db.execute(
+                    select(func.count(UserUsageLog.id)).where(
+                        UserUsageLog.user_id == user_id,
+                        UserUsageLog.timestamp >= month_start,
+                    )
                 )
-                count_result = await db.execute(stmt)
-                requests_this_month = count_result.scalar() or 0
-                
-                if requests_this_month >= user.max_requests_per_month:
+                if (count_result.scalar() or 0) >= user.max_requests_per_month:
                     raise HTTPException(
                         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Monthly limit of {user.max_requests_per_month} requests exceeded"
+                        detail=f"Monthly limit of {user.max_requests_per_month} requests exceeded",
                     )
-        
+
         except HTTPException:
             raise
         except Exception as e:
             logger.warning(f"Error checking rate limits: {e}")
-    
+
     try:
-        # Process request
         response = await call_next(request)
         process_time = (time.time() - start_time) * 1000
-        
-        # Log usage if authenticated customer
+
+        # Log JWT-authenticated customer usage
         if user_id:
             asyncio.create_task(
-                log_customer_usage(
-                    user_id,
-                    request,
-                    response.status_code,
-                    process_time
-                )
+                _log_customer_usage(user_id, request, response.status_code, process_time)
             )
-        
+
+        # Log API key consumer usage (separate from JWT users)
+        x_api_key = request.headers.get("X-API-Key", "")
+        if x_api_key and not user_id:  # avoid double-logging if both headers present
+            asyncio.create_task(
+                _log_api_key_request(x_api_key, request, response.status_code, process_time)
+            )
+
         return response
-    
+
     except Exception as e:
-        logger.error(f"Error in request tracking: {e}")
+        logger.error(f"Error in request tracking middleware: {e}")
         raise
 
 
-async def log_customer_usage(
+async def _log_customer_usage(
     user_id: str,
     request: Request,
     status_code: int,
-    response_time_ms: float
+    response_time_ms: float,
 ):
-    """Log customer API usage to database"""
+    """Async fire-and-forget: write one row to user_usage_logs."""
     try:
         from app.database import AsyncSessionLocal
         from app.models import UserUsageLog
-        
+
         async with AsyncSessionLocal() as db:
-            log_entry = UserUsageLog(
-                user_id=user_id,
-                endpoint=request.url.path.split('/')[-1] if request.url.path else 'root',
-                method=request.method,
-                path=request.url.path,
-                status_code=status_code,
-                response_time_ms=response_time_ms,
-                ip_address=request.client.host if request.client else None,
-                user_agent=request.headers.get("user-agent"),
-                query_params=dict(request.query_params) if request.query_params else None,
+            db.add(
+                UserUsageLog(
+                    user_id=user_id,
+                    endpoint=request.url.path.split("/")[-1] or "root",
+                    method=request.method,
+                    path=request.url.path,
+                    status_code=status_code,
+                    response_time_ms=response_time_ms,
+                    ip_address=request.client.host if request.client else None,
+                    user_agent=request.headers.get("user-agent"),
+                    query_params=dict(request.query_params) or None,
+                )
             )
-            db.add(log_entry)
             await db.commit()
-            logger.debug(f"Logged usage for user {user_id[:8]}... - {request.method} {request.url.path}")
-    
     except Exception as e:
         logger.error(f"Failed to log customer usage: {e}")
 
 
-# Include routers
-app.include_router(auth_router)  # Customer authentication routes
-app.include_router(router)  # Product routes
+async def _log_api_key_request(
+    api_key_value: str,
+    request: Request,
+    status_code: int,
+    response_time_ms: float,
+):
+    """
+    Async fire-and-forget: write one row to request_logs for API key consumers.
+    Looks up the key by value to get the key ID — uses a separate session
+    so it never blocks the response.
+    """
+    try:
+        from app.database import AsyncSessionLocal
+        from app.models import APIKey, RequestLog
+        from sqlalchemy import select
+
+        async with AsyncSessionLocal() as db:
+            stmt = select(APIKey).where(
+                APIKey.key == api_key_value,
+                APIKey.is_active == True,
+            )
+            result = await db.execute(stmt)
+            api_key_obj = result.scalar_one_or_none()
+            if api_key_obj:
+                db.add(
+                    RequestLog(
+                        api_key_id=api_key_obj.id,
+                        method=request.method,
+                        path=request.url.path,
+                        status_code=status_code,
+                        response_time_ms=response_time_ms,
+                    )
+                )
+                await db.commit()
+    except Exception as e:
+        logger.error(f"Failed to log API key request: {e}")
+
+# ---------------------------------------------------------------------------
+# Routers
+# ---------------------------------------------------------------------------
+app.include_router(auth_router)   # /api/auth/*
+app.include_router(router)        # /api/*
 
 
+# ---------------------------------------------------------------------------
+# Startup
+# ---------------------------------------------------------------------------
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database on startup"""
+    """
+    1. Create / migrate all DB tables
+    2. Register notification handlers
+       - EventLogNotificationHandler  → always active (guaranteed fallback)
+       - WebhookNotificationHandler   → active when WEBHOOK_URLS env var is set
+    """
     logger.info("=" * 60)
-    logger.info("🚀 Product Price Monitoring System - Starting up")
+    logger.info("🚀 Product Price Monitoring System — starting up")
     logger.info("=" * 60)
-    logger.info("Initializing database...")
+
+    # --- Database ----------------------------------------------------------
+    logger.info("Initialising database…")
     await init_db()
-    logger.info("✓ Database initialized successfully")
+    logger.info("✓ Database ready")
+
+    # --- Notification handlers --------------------------------------------
+    from app.notifications import notification_manager, WebhookNotificationHandler
+
+    webhook_urls_raw = os.getenv("WEBHOOK_URLS", "")
+    if webhook_urls_raw.strip():
+        webhook_urls = [u.strip() for u in webhook_urls_raw.split(",") if u.strip()]
+        if webhook_urls:
+            notification_manager.register_handler(WebhookNotificationHandler(webhook_urls))
+            logger.info(f"✓ Webhook handler registered ({len(webhook_urls)} URL(s))")
+        else:
+            logger.info("ℹ  WEBHOOK_URLS set but empty after parsing — webhook handler skipped")
+    else:
+        logger.info("ℹ  WEBHOOK_URLS not configured — webhook notifications disabled")
+
+    logger.info("✓ Notification system ready")
     logger.info("✓ API authentication enabled")
     logger.info("✓ Request logging enabled")
     logger.info("=" * 60)
 
 
+# ---------------------------------------------------------------------------
+# Health / root
+# ---------------------------------------------------------------------------
 @app.get("/")
 async def root():
-    """Root endpoint"""
     return {
         "message": "Product Price Monitoring System API",
         "docs": "/docs",
         "version": "1.0.0",
-        "authentication": "Use X-API-Key header",
-        "create_key": "POST /api/api-keys"
+        "authentication": "Use X-API-Key header or Bearer JWT",
+        "create_key": "POST /api/api-keys",
     }
 
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    from datetime import datetime
     return {
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "service": "Product Price Monitoring System"
+        "service": "Product Price Monitoring System",
     }
-
-
-@app.get("/")
-async def root():
-    """Root endpoint"""
-    return {"message": "Product Price Monitoring System API"}

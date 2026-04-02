@@ -154,7 +154,36 @@ class NotificationEvent(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
     processed_at = Column(DateTime, nullable=True)
 
+    # Relationships
+    delivery_logs = relationship("NotificationDeliveryLog", back_populates="event", cascade="all, delete-orphan")
+
     __table_args__ = (
         Index('idx_notification_event_status', 'is_processed'),
         Index('idx_notification_event_created', 'created_at'),
     )
+
+
+class NotificationDeliveryLog(Base):
+    """
+    Persists every delivery attempt per handler per event.
+    Survives server restarts. Used to audit delivery reliability.
+    """
+    __tablename__ = "notification_delivery_logs"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id = Column(String, ForeignKey("notification_events.id", ondelete="CASCADE"), nullable=False, index=True)
+    handler_name = Column(String, nullable=False)
+    attempt_number = Column(Integer, nullable=False, default=1)
+    success = Column(Boolean, nullable=False)
+    error_message = Column(String, nullable=True)
+    attempted_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+    # Relationships
+    event = relationship("NotificationEvent", back_populates="delivery_logs")
+
+    __table_args__ = (
+        Index('idx_delivery_log_event', 'event_id'),
+        Index('idx_delivery_log_success', 'success'),
+        Index('idx_delivery_log_attempted_at', 'attempted_at'),
+    )
+
