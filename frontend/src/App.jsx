@@ -110,7 +110,8 @@ function App() {
       </main>
 
       <footer className="bg-white border-t border-gray-200 py-4 text-center text-gray-600 text-sm">
-        <p>Product Price Monitoring System © 2024</p>
+        <p>Entrupy Assignment</p>
+        <p>Harshit Aggarwal | 2310990766 | [harshit0766.be23@chitkara.edu.in]</p>
       </footer>
     </div>
   );
