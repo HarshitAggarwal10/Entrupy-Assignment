@@ -36,7 +36,7 @@ async def refresh_data(
     """Trigger data refresh from sample products"""
     start_time = time.time()
     
-    sample_products_dir = "sample_products"
+    sample_products_dir = "../sample_products"
     imported_count, updated_count, error_count = await load_products_from_json_files(
         sample_products_dir, db
     )
