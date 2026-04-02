@@ -166,6 +166,57 @@ async def get_price_history(
     return [PriceHistoryResponse.from_orm(h) for h in history]
 
 
+@router.post("/products", response_model=ProductResponse)
+async def create_product(
+    product_in: ProductCreate,
+    api_key_id: Optional[str] = Depends(validate_api_key),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a new product manually (useful for testing or direct API users)"""
+    import uuid
+    # Check if URL already exists
+    stmt = select(Product).where(Product.url == product_in.url)
+    result = await db.execute(stmt)
+    existing = result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(status_code=400, detail="Product with this URL already exists")
+    
+    # Create product
+    new_product = Product(
+        id=str(uuid.uuid4()),
+        url=product_in.url,
+        name=product_in.name,
+        brand=product_in.brand,
+        category=product_in.category,
+        source=product_in.source,
+        price=product_in.price,
+        size=product_in.size,
+        condition=product_in.condition,
+        description=product_in.description,
+        main_image_url=product_in.main_image_url,
+        all_images=product_in.all_images,
+        product_metadata=product_in.product_metadata,
+        is_sold=product_in.is_sold
+    )
+    db.add(new_product)
+    await db.flush()
+    
+    # Record initial price in history
+    price_history = PriceHistory(
+        product_id=new_product.id,
+        old_price=None,
+        new_price=new_product.price,
+        change_percentage=0.0,
+        change_reason="manual_creation"
+    )
+    db.add(price_history)
+    
+    await db.commit()
+    await db.refresh(new_product)
+    
+    return ProductResponse.from_orm(new_product)
+
+
 @router.get("/analytics", response_model=AnalyticsResponse)
 async def get_analytics(
     api_key_id: Optional[str] = Depends(validate_api_key),

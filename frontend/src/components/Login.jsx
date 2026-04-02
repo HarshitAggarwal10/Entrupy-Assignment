@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { authService } from '../services/api';
 
 export default function Login({ onLoginSuccess }) {
   const [activeTab, setActiveTab] = useState('login');
@@ -27,32 +28,15 @@ export default function Login({ onLoginSuccess }) {
     setError(null);
 
     try {
-      const response = await fetch('http://localhost:8000/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: loginForm.username,
-          password: loginForm.password,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        // Save token and user info
-        localStorage.setItem('token', data.access_token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setSuccess(data.message);
-        
-        // Callback to parent — App.jsx will switch to dashboard view
+      const data = await authService.login(loginForm.username, loginForm.password);
+      setSuccess(data.message);
+      
+      // Callback to parent — App.jsx will switch to dashboard view
+      if (onLoginSuccess) {
         onLoginSuccess(data.access_token, data.user);
-      } else {
-        setError(data.detail || 'Login failed');
       }
     } catch (err) {
-      setError('Error connecting to server');
+      setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
       console.error('Login error:', err);
     } finally {
       setLoading(false);
@@ -77,34 +61,21 @@ export default function Login({ onLoginSuccess }) {
     }
 
     try {
-      const response = await fetch('http://localhost:8000/api/auth/register', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          username: registerForm.username,
-          email: registerForm.email,
-          password: registerForm.password,
-          full_name: registerForm.full_name,
-        }),
+      const data = await authService.register({
+        username: registerForm.username,
+        email: registerForm.email,
+        password: registerForm.password,
+        full_name: registerForm.full_name,
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
-        // Save token and user info
-        localStorage.setItem('token', data.access_token);
-        localStorage.setItem('user', JSON.stringify(data.user));
-        setSuccess(data.message);
-        
-        // Callback to parent — App.jsx will switch to dashboard view
+      setSuccess(data.message);
+      
+      // Callback to parent — App.jsx will switch to dashboard view
+      if (onLoginSuccess) {
         onLoginSuccess(data.access_token, data.user);
-      } else {
-        setError(data.detail || 'Registration failed');
       }
     } catch (err) {
-      setError('Error connecting to server');
+      setError(err.response?.data?.detail || 'Registration failed. Username or email might already be taken.');
       console.error('Register error:', err);
     } finally {
       setLoading(false);

@@ -10,6 +10,73 @@ const api = axios.create({
   baseURL: API_BASE_URL,
 });
 
+// Add a request interceptor to include the JWT token in all requests
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add a response interceptor to handle authentication errors (401)
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      // Clear local storage and redirect to login if unauthorized
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      
+      // If we're not already on a page that handles its own auth, reload
+      // This will force App.jsx to re-render and show the Login screen
+      if (!window.location.pathname.includes('/login')) {
+         window.location.reload();
+      }
+    }
+    return Promise.reject(error);
+  }
+);
+
+export const authService = {
+  login: async (username, password) => {
+    const response = await api.post('/auth/login', { username, password });
+    if (response.data.access_token) {
+      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+    }
+    return response.data;
+  },
+
+  register: async (userData) => {
+    const response = await api.post('/auth/register', userData);
+    if (response.data.access_token) {
+      localStorage.setItem('token', response.data.access_token);
+      localStorage.setItem('user', JSON.stringify(response.data.user));
+    }
+    return response.data;
+  },
+
+  logout: () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+  },
+
+  getCurrentUser: () => {
+    const userStr = localStorage.getItem('user');
+    return userStr ? JSON.parse(userStr) : null;
+  },
+
+  getToken: () => {
+    return localStorage.getItem('token');
+  },
+};
+
 export const productService = {
   getProducts: (filters = {}) => {
     const params = new URLSearchParams();

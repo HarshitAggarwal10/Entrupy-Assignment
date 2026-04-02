@@ -1,20 +1,48 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Dashboard from './components/Dashboard';
 import ProductList from './components/ProductList';
 import Notifications from './components/Notifications';
 import ApiUsage from './components/ApiUsage';
 import UserProfile from './components/UserProfile';
+import Login from './components/Login';
+import { authService } from './services/api';
 import './index.css';
 
 function App() {
   const [currentPage, setCurrentPage] = useState('dashboard');
-  const [user] = useState({ username: 'Harshit', email: 'demo@test.com' });
+  const [user, setUser] = useState(authService.getCurrentUser());
+  const [token, setToken] = useState(authService.getToken());
+
+  // Listen for storage changes (optional, but good for multi-tab sync)
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setToken(authService.getToken());
+      setUser(authService.getCurrentUser());
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  const handleLoginSuccess = (newToken, newUser) => {
+    setToken(newToken);
+    setUser(newUser);
+    setCurrentPage('dashboard');
+  };
+
+  const handleLogout = () => {
+    authService.logout();
+    setToken(null);
+    setUser(null);
+  };
+
+  if (!token) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   const navigation = [
     { id: 'dashboard', label: 'Dashboard' },
     { id: 'products', label: 'Products' },
     { id: 'notifications', label: 'Notifications' },
-    // { id: 'usage', label: 'API Usage' },
   ];
 
   return (
@@ -34,7 +62,7 @@ function App() {
                     currentPage === item.id
                       ? 'bg-blue-600 text-white'
                       : 'text-gray-700 hover:bg-gray-100'
-                  }`}
+                   }`}
                 >
                   {item.label}
                 </button>
@@ -43,24 +71,18 @@ function App() {
 
             <div className="flex items-center gap-4">
               {user && (
-                <div className="text-sm">
-                  <p className="text-gray-700 font-medium">{user.username}</p>
+                <div className="text-sm text-right">
+                  <p className="text-gray-900 font-bold">{user.full_name || user.username}</p>
+                  <p className="text-gray-500 text-xs">{user.email}</p>
                 </div>
               )}
-              {/* <div className="flex gap-2">
-                <button
-                  onClick={() => setCurrentPage('profile')}
-                  className={`px-3 py-2 rounded-md text-sm font-medium transition ${
-                    currentPage === 'profile'
-                      ? 'bg-blue-600 text-white'
-                      : 'text-gray-700 hover:bg-gray-100'
-                  }`}
-                >
-                  Profile
-                </button>
-              </div> */}
+              <button
+                onClick={handleLogout}
+                className="px-3 py-2 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition"
+              >
+                Logout
+              </button>
             </div>
-
           </div>
 
           <div className="md:hidden flex gap-1 pb-3 overflow-x-auto">
@@ -85,8 +107,6 @@ function App() {
         {currentPage === 'dashboard' && <Dashboard />}
         {currentPage === 'products' && <ProductList />}
         {currentPage === 'notifications' && <Notifications />}
-        {/* {currentPage === 'usage' && <ApiUsage />}
-        {currentPage === 'profile' && <UserProfile />} */}
       </main>
 
       <footer className="bg-white border-t border-gray-200 py-4 text-center text-gray-600 text-sm">
