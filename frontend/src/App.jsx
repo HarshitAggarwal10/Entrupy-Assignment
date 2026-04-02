@@ -145,20 +145,6 @@ function App() {
     setTokenValid(true);
   };
 
-  const clearBrowserCache = () => {
-    // Clear all storage
-    localStorage.clear();
-    sessionStorage.clear();
-    // Clear app state
-    authService.logout();
-    setToken(null);
-    setUser(null);
-    setTokenValid(true);
-    setShowCacheWarning(false);
-    // Reload page
-    window.location.reload();
-  };
-
   if (!token) {
     return (
       <>
@@ -216,13 +202,6 @@ function App() {
                   <p className="text-gray-500 text-xs">{user.email}</p>
                 </div>
               )}
-              {/* <button
-                onClick={clearBrowserCache}
-                title="Clear browser cache and localStorage"
-                className="px-2 py-2 rounded-md text-sm font-medium text-orange-600 hover:bg-orange-50 transition"
-              >
-                🗑️ Clear Cache
-              </button> */}
               <button
                 onClick={handleLogout}
                 className="px-3 py-2 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition"
